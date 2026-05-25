@@ -738,4 +738,59 @@ export default function App() {
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding:
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { background: ${C.bg}; font-family: ${FONT}; color: ${C.text}; -webkit-font-smoothing: antialiased; }
+        @keyframes toastIn { from { opacity:0; transform:translate(-50%,12px); } to { opacity:1; transform:translate(-50%,0); } }
+        @keyframes spin    { to { transform: rotate(360deg); } }
+        input:focus, textarea:focus { border-color: ${C.blue} !important; box-shadow: 0 0 0 3px ${C.blue}30 !important; }
+        button { font-family: ${FONT}; }
+        ::-webkit-scrollbar { width: 0; }
+      `}</style>
+
+      {/* Top Nav */}
+      <header style={{
+        background: C.white, borderBottom: `1px solid ${C.border}`,
+        padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center",
+        position: "sticky", top: 0, zIndex: 200, boxShadow: "0 2px 16px rgba(180,180,160,0.1)",
+      }}>
+        <div onClick={() => setPage("home")} style={{
+          fontFamily: FONT, fontSize: 18, fontWeight: 900, color: C.blue, cursor: "pointer", userSelect: "none",
+        }}>★ Wishlist</div>
+
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          background: C.blueLight, borderRadius: 50, padding: "7px 14px 7px 10px",
+          border: `2px solid ${C.blue}`,
+        }}>
+          <div style={{
+            width: 26, height: 26, borderRadius: "50%",
+            background: userId === "jamie" ? C.blue : C.pink,
+            color: userId === "jamie" ? C.white : C.pinkDark,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontWeight: 900, fontSize: 13,
+          }}>{currentUser.name[0]}</div>
+          <span style={{ fontFamily: FONT, fontWeight: 800, fontSize: 14, color: C.blueDark }}>
+            {currentUser.name}
+          </span>
+        </div>
+      </header>
+
+      {/* Content */}
+      <main style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px 100px" }}>
+        {loading ? <Spinner /> : (
+          <>
+            {page === "home"     && <HomePage      currentUser={currentUser} users={users} wishes={wishes} onNavigate={setPage} />}
+            {page === "add"      && <AddWishPage   onAdd={handleAddWish} onBack={() => setPage("home")} />}
+            {page === "mywishes" && <MyWishlistPage currentUser={currentUser} wishes={wishes} onBack={() => setPage("home")} onRequestAgain={handleRequestAgain} />}
+            {page === "evaluate" && <EvaluatePage  currentUser={currentUser} wishes={wishes} onBack={() => setPage("home")} onEvaluate={handleEvaluate} />}
+            {page === "redeem"   && <RedeemPage    currentUser={currentUser} wishes={wishes} onBack={() => setPage("home")} onRedeem={handleRedeem} />}
+            {page === "rewards"  && <RewardsPage   currentUser={currentUser} users={users} activities={activities} onBack={() => setPage("home")} onSendStar={handleSendStar} />}
+          </>
+        )}
+      </main>
+
+      <BottomNav page={page} onNavigate={setPage} />
+      {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
+    </>
+  );
+}
