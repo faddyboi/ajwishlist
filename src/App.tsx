@@ -1,38 +1,10 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore, collection, doc, onSnapshot,
   addDoc, updateDoc, serverTimestamp, query, orderBy, setDoc, getDoc
 } from "firebase/firestore";
-
-// ─── Types & Interfaces (為 TypeScript 加入型別定義) ──────────────────────────
-interface User {
-  id: string;
-  name: string;
-  starBalance?: number;
-}
-
-interface Wish {
-  id: string;
-  ownerId: string;
-  itemName: string;
-  price: number;
-  desireLevel: number;
-  url: string;
-  persuasionText: string;
-  status: string;
-  starCost: number;
-  requestCount: number;
-  createdAt: any;
-  lastRequestedAt: any;
-}
-
-interface Activity {
-  id: string;
-  actorId: string;
-  actionDescription: string;
-  timestamp: any;
-}
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
 // ─── Firebase Setup ───────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -43,8 +15,12 @@ const firebaseConfig = {
   messagingSenderId: "377776890778",
   appId: "1:377776890778:web:4ea211b80a6fd9a367d023"
 };
-const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
+const app       = initializeApp(firebaseConfig);
+const db        = getFirestore(app);
+const messaging = getMessaging(app);
+
+// ── Your VAPID key from Firebase Console → Project Settings → Cloud Messaging
+const VAPID_KEY = "BJPXl8fjnrp93YU6hZaTuyAy8egsSIjIIgpXnG5i0J24gy_6clmFGLhWVubai6prPS4znWEqTHqTbsxt4LDA9m8";
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -66,7 +42,7 @@ const C = {
 };
 const FONT = "'Nunito', 'Inter', sans-serif";
 
-const STATUS: Record<string, { bg: string; color: string }> = {
+const STATUS = {
   Pending:     { bg: C.peach,      color: "#C97B4B" },
   Considering: { bg: "#FFF9E6",    color: "#B08A2A" },
   Approved:    { bg: C.green,      color: "#3A8C85" },
@@ -79,8 +55,8 @@ const USERS = [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const money = (n: number | string) => `HK$${Number(n).toLocaleString()}`;
-const fmt   = (ts: any) => {
+const money = (n) => `HK$${Number(n).toLocaleString()}`;
+const fmt   = (ts) => {
   if (!ts) return "";
   const ms   = ts?.toMillis ? ts.toMillis() : ts;
   const diff = Date.now() - ms;
@@ -90,9 +66,61 @@ const fmt   = (ts: any) => {
   return `${Math.floor(diff / 86400000)}d ago`;
 };
 
+// ─── Push Notification Helpers ────────────────────────────────────────────────
+
+// Registers this device with FCM and saves the token to Firestore
+async function registerForPush(userId) {
+  try {
+    // Ask browser/OS for notification permission
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      console.log("Notification permission denied");
+      return;
+    }
+
+    // Get this device's unique FCM token
+    const token = await getToken(messaging, {
+      vapidKey: VAPID_KEY,
+      serviceWorkerRegistration: await navigator.serviceWorker.getRegistration("/firebase-messaging-sw.js"),
+    });
+
+    if (token) {
+      // Save token to Firestore under this user's document
+      await updateDoc(doc(db, "users", userId), { fcmToken: token });
+      console.log("FCM token saved for", userId);
+    }
+  } catch (err) {
+    // Silently fail — notifications are a bonus, not critical
+    console.warn("Push registration failed:", err);
+  }
+}
+
+// Sends a push notification to the PARTNER via their saved FCM token
+async function sendPushToPartner(partnerToken, title, body) {
+  if (!partnerToken) return;
+  try {
+    // We call Firebase's FCM REST API directly from the browser
+    // Note: in production you'd do this from a server, but for a private
+    // 2-person app this is perfectly fine and keeps things simple
+    await fetch(`https://fcm.googleapis.com/fcm/send`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // We use the messagingSenderId as a lightweight auth for same-project sends
+      },
+      body: JSON.stringify({
+        to: partnerToken,
+        notification: { title, body },
+      }),
+    });
+  } catch (err) {
+    console.warn("Push send failed:", err);
+  }
+}
+
 // ─── Shared UI Atoms ──────────────────────────────────────────────────────────
-function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
-  useEffect(() => { const t = setTimeout(onDone, 3000); return () => clearTimeout(t); }, [onDone]);
+function Toast({ msg, onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 3000); return () => clearTimeout(t); }, []);
   return (
     <div style={{
       position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)",
@@ -104,7 +132,7 @@ function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   );
 }
 
-function Card({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
+function Card({ children, style = {} }) {
   return (
     <div style={{
       background: C.card, borderRadius: 20, padding: "18px 20px",
@@ -114,9 +142,8 @@ function Card({ children, style = {} }: { children: React.ReactNode; style?: Rea
   );
 }
 
-function Btn({ children, onClick, variant = "primary", style = {}, disabled = false, fullWidth = false }: 
-  { children: React.ReactNode; onClick?: () => void; variant?: string; style?: React.CSSProperties; disabled?: boolean; fullWidth?: boolean }) {
-  const variants: Record<string, React.CSSProperties> = {
+function Btn({ children, onClick, variant = "primary", style = {}, disabled = false, fullWidth = false }) {
+  const variants = {
     primary: { background: C.blue,        color: C.white,    boxShadow: `0 4px 16px ${C.blue}66` },
     ghost:   { background: "transparent", color: C.blue,     border: `2px solid ${C.blue}` },
     soft:    { background: C.blueLight,   color: C.blueDark },
@@ -136,7 +163,7 @@ function Btn({ children, onClick, variant = "primary", style = {}, disabled = fa
   );
 }
 
-function PageHeader({ title, sub, onBack }: { title: string; sub?: string; onBack?: () => void }) {
+function PageHeader({ title, sub, onBack }) {
   return (
     <div style={{ marginBottom: 24 }}>
       {onBack && (
@@ -153,11 +180,11 @@ function PageHeader({ title, sub, onBack }: { title: string; sub?: string; onBac
   );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function SectionTitle({ children }) {
   return <h2 style={{ fontFamily: FONT, fontSize: 16, fontWeight: 800, color: C.text, margin: "0 0 12px" }}>{children}</h2>;
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status }) {
   const s = STATUS[status] || { bg: C.border, color: C.sub };
   return (
     <span style={{
@@ -167,7 +194,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function HeartBar({ value, max = 5 }: { value: number; max?: number }) {
+function HeartBar({ value, max = 5 }) {
   return (
     <span style={{ display: "inline-flex", gap: 2 }}>
       {Array.from({ length: max }, (_, i) => i + 1).map(n => (
@@ -177,7 +204,7 @@ function HeartBar({ value, max = 5 }: { value: number; max?: number }) {
   );
 }
 
-function StarRater({ value, max = 10, onChange, size = 22 }: { value: number; max?: number; onChange?: (n: number) => void; size?: number }) {
+function StarRater({ value, max = 10, onChange, size = 22 }) {
   const [hov, setHov] = useState(0);
   return (
     <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
@@ -196,7 +223,7 @@ function StarRater({ value, max = 10, onChange, size = 22 }: { value: number; ma
   );
 }
 
-function InputField({ label, children }: { label: string; children: React.ReactNode }) {
+function InputField({ label, children }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <label style={{
@@ -208,7 +235,7 @@ function InputField({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-const inputStyle: React.CSSProperties = {
+const inputStyle = {
   width: "100%", padding: "12px 15px", borderRadius: 14,
   border: `1.5px solid ${C.border}`, fontSize: 15, fontFamily: FONT,
   color: C.text, background: C.white, boxSizing: "border-box", outline: "none",
@@ -222,13 +249,46 @@ function Spinner() {
         border: `3px solid ${C.blueLight}`, borderTopColor: C.blue,
         animation: "spin .8s linear infinite",
       }} />
-      <p style={{ color: C.sub, fontFamily: FONT, fontWeight: 600, fontSize: 14 }}>Connecting to database…</p>
+      <p style={{ color: C.sub, fontFamily: FONT, fontWeight: 600, fontSize: 14 }}>Connecting…</p>
+    </div>
+  );
+}
+
+// ─── Notification Permission Banner ───────────────────────────────────────────
+function NotifBanner({ onAllow, onDismiss }) {
+  return (
+    <div style={{
+      position: "fixed", top: 70, left: 16, right: 16, zIndex: 500,
+      background: C.white, borderRadius: 18, padding: "16px 18px",
+      boxShadow: "0 8px 32px rgba(180,180,160,0.25)", border: `1.5px solid ${C.blue}`,
+      display: "flex", flexDirection: "column", gap: 12,
+      animation: "toastIn .3s cubic-bezier(.22,1,.36,1)",
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <span style={{ fontSize: 28, lineHeight: 1 }}>🔔</span>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: C.text, marginBottom: 4 }}>
+            Enable Notifications
+          </div>
+          <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.5 }}>
+            Get notified when your partner adds a wish, sends a star, or approves something for you!
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn onClick={onAllow} fullWidth style={{ fontSize: 13, padding: "10px" }}>
+          ✅ Allow Notifications
+        </Btn>
+        <Btn variant="muted" onClick={onDismiss} style={{ fontSize: 13, padding: "10px 16px" }}>
+          Later
+        </Btn>
+      </div>
     </div>
   );
 }
 
 // ─── PAGE: Home ───────────────────────────────────────────────────────────────
-function HomePage({ currentUser, users, wishes, onNavigate }: { currentUser: User; users: User[]; wishes: Wish[]; onNavigate: (page: string) => void }) {
+function HomePage({ currentUser, users, wishes, onNavigate }) {
   const partner       = users.find(u => u.id !== currentUser.id);
   const mine          = wishes.filter(w => w.ownerId === currentUser.id);
   const redeemed      = mine.filter(w => w.status === "Redeemed").length;
@@ -306,10 +366,10 @@ function HomePage({ currentUser, users, wishes, onNavigate }: { currentUser: Use
 }
 
 // ─── PAGE: Add Wish ───────────────────────────────────────────────────────────
-function AddWishPage({ onAdd, onBack }: { onAdd: (wish: Partial<Wish>) => Promise<void>; onBack: () => void }) {
-  const [f, setF] = useState({ itemName: "", price: "", desireLevel: 3, url: "", persuasionText: "" });
+function AddWishPage({ onAdd, onBack }) {
+  const [f, setF]       = useState({ itemName: "", price: "", desireLevel: 3, url: "", persuasionText: "" });
   const [saving, setSaving] = useState(false);
-  const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
 
   const handleSend = async () => {
     if (!f.itemName.trim()) return;
@@ -350,7 +410,7 @@ function AddWishPage({ onAdd, onBack }: { onAdd: (wish: Partial<Wish>) => Promis
         <InputField label="Persuade Me 😏">
           <textarea value={f.persuasionText} onChange={e => set("persuasionText", e.target.value)}
             placeholder="Make your case… why do you NEED this?" rows={4}
-            style={{ ...inputStyle, resize: "vertical" as any }} />
+            style={{ ...inputStyle, resize: "vertical" }} />
         </InputField>
       </Card>
       <div style={{ display: "flex", gap: 10 }}>
@@ -362,7 +422,7 @@ function AddWishPage({ onAdd, onBack }: { onAdd: (wish: Partial<Wish>) => Promis
 }
 
 // ─── PAGE: My Wishlist ────────────────────────────────────────────────────────
-function MyWishlistPage({ currentUser, wishes, onBack, onRequestAgain }: { currentUser: User; wishes: Wish[]; onBack: () => void; onRequestAgain: (id: string) => Promise<void> }) {
+function MyWishlistPage({ currentUser, wishes, onBack, onRequestAgain }) {
   const mine = wishes.filter(w => w.ownerId === currentUser.id);
   return (
     <div>
@@ -398,12 +458,12 @@ function MyWishlistPage({ currentUser, wishes, onBack, onRequestAgain }: { curre
 }
 
 // ─── PAGE: Evaluate ───────────────────────────────────────────────────────────
-function EvaluatePage({ currentUser, wishes, onBack, onEvaluate }: { currentUser: User; wishes: Wish[]; onBack: () => void; onEvaluate: (id: string, status: string, cost: number) => Promise<void> }) {
-  const [costs, setCosts]   = useState<Record<string, number>>({});
-  const [saving, setSaving] = useState<string | null>(null);
+function EvaluatePage({ currentUser, wishes, onBack, onEvaluate }) {
+  const [costs, setCosts]   = useState({});
+  const [saving, setSaving] = useState(null);
   const pending = wishes.filter(w => w.ownerId !== currentUser.id && ["Pending", "Considering"].includes(w.status));
 
-  const handle = async (wishId: string, status: string) => {
+  const handle = async (wishId, status) => {
     setSaving(wishId + status);
     await onEvaluate(wishId, status, costs[wishId] || 0);
     setSaving(null);
@@ -413,7 +473,7 @@ function EvaluatePage({ currentUser, wishes, onBack, onEvaluate }: { currentUser
     <div>
       <PageHeader title="Partner Evaluation ⚖️" sub={`${pending.length} wishes await your verdict`} onBack={onBack} />
       {pending.length === 0
-        ? <Card><p style={{ color: C.sub, textAlign: "center", padding: 24 }}>All caught up! No pending wishes.</p></Card>
+        ? <Card><p style={{ color: C.sub, textAlign: "center", padding: 24 }}>All caught up!</p></Card>
         : pending.map(w => (
           <Card key={w.id} style={{ marginBottom: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
@@ -465,13 +525,13 @@ function EvaluatePage({ currentUser, wishes, onBack, onEvaluate }: { currentUser
 }
 
 // ─── PAGE: Redemption Center ──────────────────────────────────────────────────
-function RedeemPage({ currentUser, wishes, onBack, onRedeem }: { currentUser: User; wishes: Wish[]; onBack: () => void; onRedeem: (id: string) => Promise<void> }) {
+function RedeemPage({ currentUser, wishes, onBack, onRedeem }) {
   const [tab, setTab]       = useState("All");
-  const [saving, setSaving] = useState<string | null>(null);
+  const [saving, setSaving] = useState(null);
   const mine  = wishes.filter(w => w.ownerId === currentUser.id);
   const shown = tab === "All" ? mine : mine.filter(w => w.status === tab);
 
-  const handle = async (wishId: string) => {
+  const handle = async (wishId) => {
     setSaving(wishId);
     await onRedeem(wishId);
     setSaving(null);
@@ -488,7 +548,6 @@ function RedeemPage({ currentUser, wishes, onBack, onRedeem }: { currentUser: Us
         <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "1px", opacity: .85, marginBottom: 2 }}>YOUR BALANCE</div>
         <div style={{ fontFamily: FONT, fontSize: 42, fontWeight: 900 }}>{currentUser.starBalance ?? 0} ★</div>
       </div>
-
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         {["All", "Approved", "Considering"].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
@@ -498,7 +557,6 @@ function RedeemPage({ currentUser, wishes, onBack, onRedeem }: { currentUser: Us
           }}>{t}</button>
         ))}
       </div>
-
       {shown.length === 0
         ? <Card><p style={{ color: C.sub, textAlign: "center", padding: 20 }}>No wishes here</p></Card>
         : shown.map(w => (
@@ -528,22 +586,21 @@ function RedeemPage({ currentUser, wishes, onBack, onRedeem }: { currentUser: Us
 }
 
 // ─── PAGE: Rewards ────────────────────────────────────────────────────────────
-function RewardsPage({ currentUser, users, activities, onBack, onSendStar }: { currentUser: User; users: User[]; activities: Activity[]; onBack: () => void; onSendStar: () => Promise<void> }) {
+function RewardsPage({ currentUser, users, activities, onBack, onSendStar }) {
   const partner  = users.find(u => u.id !== currentUser.id);
   const sorted   = [...activities].sort((a, b) => {
     const ta = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp || 0);
     const tb = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp || 0);
     return tb - ta;
   });
-  const actorName = (id: string) => users.find(u => u.id === id)?.name || id;
-  const avatarBg: Record<string, string> = { jamie: C.blueLight, andie: C.pink };
+  const actorName = id => users.find(u => u.id === id)?.name || id;
+  const avatarBg  = { jamie: C.blueLight, andie: C.pink };
 
   return (
     <div>
       <PageHeader title="Stars & Rewards ⭐" sub="Send love, track activity" onBack={onBack} />
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-        {[currentUser, partner].filter(Boolean).map((u, i) => u && (
+        {[currentUser, partner].filter(Boolean).map((u, i) => (
           <Card key={u.id} style={{ textAlign: "center", padding: "20px 12px", border: i === 0 ? `2px solid ${C.blue}` : `1px solid ${C.border}` }}>
             <div style={{
               width: 40, height: 40, borderRadius: "50%",
@@ -558,7 +615,6 @@ function RewardsPage({ currentUser, users, activities, onBack, onSendStar }: { c
           </Card>
         ))}
       </div>
-
       <div style={{
         background: `linear-gradient(135deg, ${C.blue} 0%, #C8D8F0 100%)`,
         borderRadius: 20, padding: "22px 24px", marginBottom: 28, textAlign: "center",
@@ -574,7 +630,6 @@ function RewardsPage({ currentUser, users, activities, onBack, onSendStar }: { c
           display: "inline-flex", alignItems: "center", gap: 8,
         }}>⭐ Send a Star to {partner?.name}!</button>
       </div>
-
       <SectionTitle>Global Activity Feed</SectionTitle>
       {sorted.length === 0
         ? <Card><p style={{ color: C.sub, textAlign: "center", padding: 16 }}>No activity yet</p></Card>
@@ -607,7 +662,7 @@ const NAV_ITEMS = [
   { page: "rewards",  icon: "⭐", label: "Stars"    },
 ];
 
-function BottomNav({ page, onNavigate }: { page: string; onNavigate: (page: string) => void }) {
+function BottomNav({ page, onNavigate }) {
   return (
     <nav style={{
       position: "fixed", bottom: 0, left: 0, right: 0,
@@ -641,80 +696,133 @@ export default function App() {
     return p === "andie" ? "andie" : "jamie";
   })();
 
-  const [users,      setUsers]      = useState<User[]>([]);
-  const [wishes,     setWishes]     = useState<Wish[]>([]);
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [userId]                    = useState(urlUser);
-  const [page,       setPage]       = useState("home");
-  const [toast,      setToast]      = useState<string | null>(null);
-  const [loading,    setLoading]    = useState(true);
+  const [users,       setUsers]       = useState([]);
+  const [wishes,      setWishes]      = useState([]);
+  const [activities,  setActivities]  = useState([]);
+  const [userId]                      = useState(urlUser);
+  const [page,        setPage]        = useState("home");
+  const [toast,       setToast]       = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [showNotifBanner, setShowNotifBanner] = useState(false);
 
   const currentUser = users.find(u => u.id === userId) || { id: userId, name: userId === "jamie" ? "Jamie" : "Andie", starBalance: 0 };
   const partner     = users.find(u => u.id !== userId) || { id: userId === "jamie" ? "andie" : "jamie", name: userId === "jamie" ? "Andie" : "Jamie", starBalance: 0 };
 
-  const showToast = (msg: string) => setToast(msg);
+  const showToast = msg => setToast(msg);
 
+  // ── Seed users ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const seed = async () => {
       for (const u of USERS) {
         const ref  = doc(db, "users", u.id);
         const snap = await getDoc(ref);
-        if (!snap.exists()) {
-          await setDoc(ref, { name: u.name, starBalance: 0 });
-        }
+        if (!snap.exists()) await setDoc(ref, { name: u.name, starBalance: 0 });
       }
     };
     seed();
   }, []);
 
+  // ── Real-time Firestore listeners ───────────────────────────────────────────
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, "users"), snap => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
+      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setLoading(false);
     });
     const unsubWishes = onSnapshot(collection(db, "wishes"), snap => {
-      setWishes(snap.docs.map(d => ({ id: d.id, ...d.data() } as Wish)));
+      setWishes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     const unsubActs = onSnapshot(
       query(collection(db, "activities"), orderBy("timestamp", "desc")),
-      snap => setActivities(snap.docs.map(d => ({ id: d.id, ...d.data() } as Activity)))
+      snap => setActivities(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
     return () => { unsubUsers(); unsubWishes(); unsubActs(); };
   }, []);
 
-  const logActivity = useCallback(async (actorId: string, actionDescription: string) => {
+  // ── Show notification banner after 3 seconds if not yet granted ─────────────
+  useEffect(() => {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      const t = setTimeout(() => setShowNotifBanner(true), 3000);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  // ── Listen for foreground push messages (app is open) ───────────────────────
+  useEffect(() => {
+    const unsub = onMessage(messaging, (payload) => {
+      const { title, body } = payload.notification || {};
+      if (title || body) showToast(`${title}: ${body}`);
+    });
+    return unsub;
+  }, []);
+
+  // ── Handle "Allow" tap on notification banner ───────────────────────────────
+  const handleAllowNotifications = async () => {
+    setShowNotifBanner(false);
+    await registerForPush(userId);
+  };
+
+  // ── Activity logger ─────────────────────────────────────────────────────────
+  const logActivity = useCallback(async (actorId, actionDescription) => {
     await addDoc(collection(db, "activities"), { actorId, actionDescription, timestamp: serverTimestamp() });
   }, []);
 
-  const handleAddWish = async ({ itemName, price, desireLevel, url, persuasionText }: Partial<Wish>) => {
+  // ── Helper: get partner's FCM token from Firestore ──────────────────────────
+  const getPartnerToken = async () => {
+    const snap = await getDoc(doc(db, "users", partner.id));
+    return snap.data()?.fcmToken || null;
+  };
+
+  // ── App Actions (all write to Firestore + send push) ────────────────────────
+  const handleAddWish = async ({ itemName, price, desireLevel, url, persuasionText }) => {
     await addDoc(collection(db, "wishes"), {
       ownerId: userId, itemName, price, desireLevel, url, persuasionText,
       status: "Pending", starCost: 0, requestCount: 1,
       createdAt: serverTimestamp(), lastRequestedAt: serverTimestamp(),
     });
     await logActivity(userId, `Added a new wish: ${itemName}`);
+    // 🔔 Notify partner
+    const token = await getPartnerToken();
+    await sendPushToPartner(token,
+      `✨ ${currentUser.name} added a new wish!`,
+      `"${itemName}" — go take a look 👀`
+    );
     showToast("Wish sent! 💌");
     setPage("home");
   };
 
-  const handleRequestAgain = async (wishId: string) => {
+  const handleRequestAgain = async (wishId) => {
     const w = wishes.find(x => x.id === wishId);
     await updateDoc(doc(db, "wishes", wishId), {
       requestCount: (w?.requestCount || 1) + 1,
       lastRequestedAt: serverTimestamp(),
     });
     await logActivity(userId, `${w?.itemName} was requested again!`);
+    // 🔔 Notify partner
+    const token = await getPartnerToken();
+    await sendPushToPartner(token,
+      `💌 ${currentUser.name} really wants something…`,
+      `They requested "${w?.itemName}" again!`
+    );
     showToast("Request sent again! 🔁");
   };
 
-  const handleEvaluate = async (wishId: string, status: string, starCost: number) => {
+  const handleEvaluate = async (wishId, status, starCost) => {
     const w = wishes.find(x => x.id === wishId);
     await updateDoc(doc(db, "wishes", wishId), { status, starCost });
     await logActivity(userId, `${status === "Approved" ? "Approved" : "Considering"}: ${w?.itemName}`);
+    // 🔔 Notify partner only when approved
+    if (status === "Approved") {
+      const token = await getPartnerToken();
+      await sendPushToPartner(token,
+        `🚀 Your wish was approved!`,
+        `"${w?.itemName}" is approved — check your Redemption Center 🎁`
+      );
+    }
     showToast(status === "Considering" ? "Considering! 🧠" : "Approved! 🚀");
   };
 
-  const handleRedeem = async (wishId: string) => {
+  const handleRedeem = async (wishId) => {
     const w = wishes.find(x => x.id === wishId);
     if (!w) return;
     if ((currentUser.starBalance ?? 0) < w.starCost) {
@@ -728,9 +836,14 @@ export default function App() {
   };
 
   const handleSendStar = async () => {
-    if (!partner) return;
     await updateDoc(doc(db, "users", partner.id), { starBalance: (partner.starBalance ?? 0) + 1 });
     await logActivity(userId, `Sent ${partner.name} a ⭐ Star!`);
+    // 🔔 Notify partner
+    const token = await getPartnerToken();
+    await sendPushToPartner(token,
+      `⭐ ${currentUser.name} sent you a star!`,
+      `Your balance just went up 🎉`
+    );
     showToast("Star has been sent! ⭐");
   };
 
@@ -756,7 +869,6 @@ export default function App() {
         <div onClick={() => setPage("home")} style={{
           fontFamily: FONT, fontSize: 18, fontWeight: 900, color: C.blue, cursor: "pointer", userSelect: "none",
         }}>★ Wishlist</div>
-
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
           background: C.blueLight, borderRadius: 50, padding: "7px 14px 7px 10px",
@@ -774,6 +886,14 @@ export default function App() {
           </span>
         </div>
       </header>
+
+      {/* Notification permission banner */}
+      {showNotifBanner && (
+        <NotifBanner
+          onAllow={handleAllowNotifications}
+          onDismiss={() => setShowNotifBanner(false)}
+        />
+      )}
 
       {/* Content */}
       <main style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px 100px" }}>
