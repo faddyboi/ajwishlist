@@ -1,14 +1,39 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
-  collection,
-  getFirestore,
-  onSnapshot,
-  updateDoc,
-  addDoc,
-  doc,
-  serverTimestamp
+  getFirestore, collection, doc, onSnapshot,
+  addDoc, updateDoc, serverTimestamp, query, orderBy, setDoc, getDoc
 } from "firebase/firestore";
+
+// ─── Types & Interfaces (為 TypeScript 加入型別定義) ──────────────────────────
+interface User {
+  id: string;
+  name: string;
+  starBalance?: number;
+}
+
+interface Wish {
+  id: string;
+  ownerId: string;
+  itemName: string;
+  price: number;
+  desireLevel: number;
+  url: string;
+  persuasionText: string;
+  status: string;
+  starCost: number;
+  requestCount: number;
+  createdAt: any;
+  lastRequestedAt: any;
+}
+
+interface Activity {
+  id: string;
+  actorId: string;
+  actionDescription: string;
+  timestamp: any;
+}
+
 // ─── Firebase Setup ───────────────────────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyDqCiKBERSp_ybqTPgHKGogW_uDywvwiDQ",
@@ -41,7 +66,7 @@ const C = {
 };
 const FONT = "'Nunito', 'Inter', sans-serif";
 
-const STATUS = {
+const STATUS: Record<string, { bg: string; color: string }> = {
   Pending:     { bg: C.peach,      color: "#C97B4B" },
   Considering: { bg: "#FFF9E6",    color: "#B08A2A" },
   Approved:    { bg: C.green,      color: "#3A8C85" },
@@ -54,9 +79,8 @@ const USERS = [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const uid   = () => Math.random().toString(36).slice(2, 9);
-const money = (n) => `HK$${Number(n).toLocaleString()}`;
-const fmt   = (ts) => {
+const money = (n: number | string) => `HK$${Number(n).toLocaleString()}`;
+const fmt   = (ts: any) => {
   if (!ts) return "";
   const ms   = ts?.toMillis ? ts.toMillis() : ts;
   const diff = Date.now() - ms;
@@ -67,8 +91,8 @@ const fmt   = (ts) => {
 };
 
 // ─── Shared UI Atoms ──────────────────────────────────────────────────────────
-function Toast({ msg, onDone }) {
-  useEffect(() => { const t = setTimeout(onDone, 3000); return () => clearTimeout(t); }, []);
+function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
+  useEffect(() => { const t = setTimeout(onDone, 3000); return () => clearTimeout(t); }, [onDone]);
   return (
     <div style={{
       position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)",
@@ -80,7 +104,7 @@ function Toast({ msg, onDone }) {
   );
 }
 
-function Card({ children, style = {} }) {
+function Card({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <div style={{
       background: C.card, borderRadius: 20, padding: "18px 20px",
@@ -90,8 +114,9 @@ function Card({ children, style = {} }) {
   );
 }
 
-function Btn({ children, onClick, variant = "primary", style = {}, disabled = false, fullWidth = false }) {
-  const variants = {
+function Btn({ children, onClick, variant = "primary", style = {}, disabled = false, fullWidth = false }: 
+  { children: React.ReactNode; onClick?: () => void; variant?: string; style?: React.CSSProperties; disabled?: boolean; fullWidth?: boolean }) {
+  const variants: Record<string, React.CSSProperties> = {
     primary: { background: C.blue,        color: C.white,    boxShadow: `0 4px 16px ${C.blue}66` },
     ghost:   { background: "transparent", color: C.blue,     border: `2px solid ${C.blue}` },
     soft:    { background: C.blueLight,   color: C.blueDark },
@@ -111,7 +136,7 @@ function Btn({ children, onClick, variant = "primary", style = {}, disabled = fa
   );
 }
 
-function PageHeader({ title, sub, onBack }) {
+function PageHeader({ title, sub, onBack }: { title: string; sub?: string; onBack?: () => void }) {
   return (
     <div style={{ marginBottom: 24 }}>
       {onBack && (
@@ -128,11 +153,11 @@ function PageHeader({ title, sub, onBack }) {
   );
 }
 
-function SectionTitle({ children }) {
+function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 style={{ fontFamily: FONT, fontSize: 16, fontWeight: 800, color: C.text, margin: "0 0 12px" }}>{children}</h2>;
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ status }: { status: string }) {
   const s = STATUS[status] || { bg: C.border, color: C.sub };
   return (
     <span style={{
@@ -142,7 +167,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function HeartBar({ value, max = 5 }) {
+function HeartBar({ value, max = 5 }: { value: number; max?: number }) {
   return (
     <span style={{ display: "inline-flex", gap: 2 }}>
       {Array.from({ length: max }, (_, i) => i + 1).map(n => (
@@ -152,7 +177,7 @@ function HeartBar({ value, max = 5 }) {
   );
 }
 
-function StarRater({ value, max = 10, onChange, size = 22 }) {
+function StarRater({ value, max = 10, onChange, size = 22 }: { value: number; max?: number; onChange?: (n: number) => void; size?: number }) {
   const [hov, setHov] = useState(0);
   return (
     <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
@@ -171,7 +196,7 @@ function StarRater({ value, max = 10, onChange, size = 22 }) {
   );
 }
 
-function InputField({ label, children }) {
+function InputField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <label style={{
@@ -183,7 +208,7 @@ function InputField({ label, children }) {
   );
 }
 
-const inputStyle = {
+const inputStyle: React.CSSProperties = {
   width: "100%", padding: "12px 15px", borderRadius: 14,
   border: `1.5px solid ${C.border}`, fontSize: 15, fontFamily: FONT,
   color: C.text, background: C.white, boxSizing: "border-box", outline: "none",
@@ -203,7 +228,7 @@ function Spinner() {
 }
 
 // ─── PAGE: Home ───────────────────────────────────────────────────────────────
-function HomePage({ currentUser, users, wishes, onNavigate }) {
+function HomePage({ currentUser, users, wishes, onNavigate }: { currentUser: User; users: User[]; wishes: Wish[]; onNavigate: (page: string) => void }) {
   const partner       = users.find(u => u.id !== currentUser.id);
   const mine          = wishes.filter(w => w.ownerId === currentUser.id);
   const redeemed      = mine.filter(w => w.status === "Redeemed").length;
@@ -281,10 +306,10 @@ function HomePage({ currentUser, users, wishes, onNavigate }) {
 }
 
 // ─── PAGE: Add Wish ───────────────────────────────────────────────────────────
-function AddWishPage({ onAdd, onBack }) {
-  const [f, setF]       = useState({ itemName: "", price: "", desireLevel: 3, url: "", persuasionText: "" });
+function AddWishPage({ onAdd, onBack }: { onAdd: (wish: Partial<Wish>) => Promise<void>; onBack: () => void }) {
+  const [f, setF] = useState({ itemName: "", price: "", desireLevel: 3, url: "", persuasionText: "" });
   const [saving, setSaving] = useState(false);
-  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
 
   const handleSend = async () => {
     if (!f.itemName.trim()) return;
@@ -325,7 +350,7 @@ function AddWishPage({ onAdd, onBack }) {
         <InputField label="Persuade Me 😏">
           <textarea value={f.persuasionText} onChange={e => set("persuasionText", e.target.value)}
             placeholder="Make your case… why do you NEED this?" rows={4}
-            style={{ ...inputStyle, resize: "vertical" }} />
+            style={{ ...inputStyle, resize: "vertical" as any }} />
         </InputField>
       </Card>
       <div style={{ display: "flex", gap: 10 }}>
@@ -337,7 +362,7 @@ function AddWishPage({ onAdd, onBack }) {
 }
 
 // ─── PAGE: My Wishlist ────────────────────────────────────────────────────────
-function MyWishlistPage({ currentUser, wishes, onBack, onRequestAgain }) {
+function MyWishlistPage({ currentUser, wishes, onBack, onRequestAgain }: { currentUser: User; wishes: Wish[]; onBack: () => void; onRequestAgain: (id: string) => Promise<void> }) {
   const mine = wishes.filter(w => w.ownerId === currentUser.id);
   return (
     <div>
@@ -373,12 +398,12 @@ function MyWishlistPage({ currentUser, wishes, onBack, onRequestAgain }) {
 }
 
 // ─── PAGE: Evaluate ───────────────────────────────────────────────────────────
-function EvaluatePage({ currentUser, wishes, onBack, onEvaluate }) {
-  const [costs, setCosts]   = useState({});
-  const [saving, setSaving] = useState(null);
+function EvaluatePage({ currentUser, wishes, onBack, onEvaluate }: { currentUser: User; wishes: Wish[]; onBack: () => void; onEvaluate: (id: string, status: string, cost: number) => Promise<void> }) {
+  const [costs, setCosts]   = useState<Record<string, number>>({});
+  const [saving, setSaving] = useState<string | null>(null);
   const pending = wishes.filter(w => w.ownerId !== currentUser.id && ["Pending", "Considering"].includes(w.status));
 
-  const handle = async (wishId, status) => {
+  const handle = async (wishId: string, status: string) => {
     setSaving(wishId + status);
     await onEvaluate(wishId, status, costs[wishId] || 0);
     setSaving(null);
@@ -440,13 +465,13 @@ function EvaluatePage({ currentUser, wishes, onBack, onEvaluate }) {
 }
 
 // ─── PAGE: Redemption Center ──────────────────────────────────────────────────
-function RedeemPage({ currentUser, wishes, onBack, onRedeem }) {
+function RedeemPage({ currentUser, wishes, onBack, onRedeem }: { currentUser: User; wishes: Wish[]; onBack: () => void; onRedeem: (id: string) => Promise<void> }) {
   const [tab, setTab]       = useState("All");
-  const [saving, setSaving] = useState(null);
+  const [saving, setSaving] = useState<string | null>(null);
   const mine  = wishes.filter(w => w.ownerId === currentUser.id);
   const shown = tab === "All" ? mine : mine.filter(w => w.status === tab);
 
-  const handle = async (wishId) => {
+  const handle = async (wishId: string) => {
     setSaving(wishId);
     await onRedeem(wishId);
     setSaving(null);
@@ -503,22 +528,22 @@ function RedeemPage({ currentUser, wishes, onBack, onRedeem }) {
 }
 
 // ─── PAGE: Rewards ────────────────────────────────────────────────────────────
-function RewardsPage({ currentUser, users, activities, onBack, onSendStar }) {
+function RewardsPage({ currentUser, users, activities, onBack, onSendStar }: { currentUser: User; users: User[]; activities: Activity[]; onBack: () => void; onSendStar: () => Promise<void> }) {
   const partner  = users.find(u => u.id !== currentUser.id);
   const sorted   = [...activities].sort((a, b) => {
     const ta = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp || 0);
     const tb = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp || 0);
     return tb - ta;
   });
-  const actorName = id => users.find(u => u.id === id)?.name || id;
-  const avatarBg  = { jamie: C.blueLight, andie: C.pink };
+  const actorName = (id: string) => users.find(u => u.id === id)?.name || id;
+  const avatarBg: Record<string, string> = { jamie: C.blueLight, andie: C.pink };
 
   return (
     <div>
       <PageHeader title="Stars & Rewards ⭐" sub="Send love, track activity" onBack={onBack} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-        {[currentUser, partner].filter(Boolean).map((u, i) => (
+        {[currentUser, partner].filter(Boolean).map((u, i) => u && (
           <Card key={u.id} style={{ textAlign: "center", padding: "20px 12px", border: i === 0 ? `2px solid ${C.blue}` : `1px solid ${C.border}` }}>
             <div style={{
               width: 40, height: 40, borderRadius: "50%",
@@ -582,7 +607,7 @@ const NAV_ITEMS = [
   { page: "rewards",  icon: "⭐", label: "Stars"    },
 ];
 
-function BottomNav({ page, onNavigate }) {
+function BottomNav({ page, onNavigate }: { page: string; onNavigate: (page: string) => void }) {
   return (
     <nav style={{
       position: "fixed", bottom: 0, left: 0, right: 0,
@@ -611,26 +636,24 @@ function BottomNav({ page, onNavigate }) {
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  // ── Read ?user=jamie or ?user=andie from the URL — locked, no switcher ──────
   const urlUser = (() => {
     const p = new URLSearchParams(window.location.search).get("user");
-    return p === "andie" ? "andie" : "jamie"; // default to jamie if param missing/wrong
+    return p === "andie" ? "andie" : "jamie";
   })();
 
-  const [users,      setUsers]      = useState([]);
-  const [wishes,     setWishes]     = useState([]);
-  const [activities, setActivities] = useState([]);
-  const [userId]                    = useState(urlUser); // locked — no setter exposed
+  const [users,      setUsers]      = useState<User[]>([]);
+  const [wishes,     setWishes]     = useState<Wish[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [userId]                    = useState(urlUser);
   const [page,       setPage]       = useState("home");
-  const [toast,      setToast]      = useState(null);
+  const [toast,      setToast]      = useState<string | null>(null);
   const [loading,    setLoading]    = useState(true);
 
   const currentUser = users.find(u => u.id === userId) || { id: userId, name: userId === "jamie" ? "Jamie" : "Andie", starBalance: 0 };
   const partner     = users.find(u => u.id !== userId) || { id: userId === "jamie" ? "andie" : "jamie", name: userId === "jamie" ? "Andie" : "Jamie", starBalance: 0 };
 
-  const showToast = msg => setToast(msg);
+  const showToast = (msg: string) => setToast(msg);
 
-  // ── Seed user docs if they don't exist ─────────────────────────────────────
   useEffect(() => {
     const seed = async () => {
       for (const u of USERS) {
@@ -644,28 +667,26 @@ export default function App() {
     seed();
   }, []);
 
-  // ── Real-time listeners ─────────────────────────────────────────────────────
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, "users"), snap => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
       setLoading(false);
     });
     const unsubWishes = onSnapshot(collection(db, "wishes"), snap => {
-      setWishes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setWishes(snap.docs.map(d => ({ id: d.id, ...d.data() } as Wish)));
     });
     const unsubActs = onSnapshot(
       query(collection(db, "activities"), orderBy("timestamp", "desc")),
-      snap => setActivities(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      snap => setActivities(snap.docs.map(d => ({ id: d.id, ...d.data() } as Activity)))
     );
     return () => { unsubUsers(); unsubWishes(); unsubActs(); };
   }, []);
 
-  // ── Firestore actions ───────────────────────────────────────────────────────
-  const logActivity = useCallback(async (actorId, actionDescription) => {
+  const logActivity = useCallback(async (actorId: string, actionDescription: string) => {
     await addDoc(collection(db, "activities"), { actorId, actionDescription, timestamp: serverTimestamp() });
   }, []);
 
-  const handleAddWish = async ({ itemName, price, desireLevel, url, persuasionText }) => {
+  const handleAddWish = async ({ itemName, price, desireLevel, url, persuasionText }: Partial<Wish>) => {
     await addDoc(collection(db, "wishes"), {
       ownerId: userId, itemName, price, desireLevel, url, persuasionText,
       status: "Pending", starCost: 0, requestCount: 1,
@@ -676,7 +697,7 @@ export default function App() {
     setPage("home");
   };
 
-  const handleRequestAgain = async (wishId) => {
+  const handleRequestAgain = async (wishId: string) => {
     const w = wishes.find(x => x.id === wishId);
     await updateDoc(doc(db, "wishes", wishId), {
       requestCount: (w?.requestCount || 1) + 1,
@@ -686,14 +707,14 @@ export default function App() {
     showToast("Request sent again! 🔁");
   };
 
-  const handleEvaluate = async (wishId, status, starCost) => {
+  const handleEvaluate = async (wishId: string, status: string, starCost: number) => {
     const w = wishes.find(x => x.id === wishId);
     await updateDoc(doc(db, "wishes", wishId), { status, starCost });
     await logActivity(userId, `${status === "Approved" ? "Approved" : "Considering"}: ${w?.itemName}`);
     showToast(status === "Considering" ? "Considering! 🧠" : "Approved! 🚀");
   };
 
-  const handleRedeem = async (wishId) => {
+  const handleRedeem = async (wishId: string) => {
     const w = wishes.find(x => x.id === wishId);
     if (!w) return;
     if ((currentUser.starBalance ?? 0) < w.starCost) {
@@ -707,6 +728,7 @@ export default function App() {
   };
 
   const handleSendStar = async () => {
+    if (!partner) return;
     await updateDoc(doc(db, "users", partner.id), { starBalance: (partner.starBalance ?? 0) + 1 });
     await logActivity(userId, `Sent ${partner.name} a ⭐ Star!`);
     showToast("Star has been sent! ⭐");
@@ -716,60 +738,4 @@ export default function App() {
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { background: ${C.bg}; font-family: ${FONT}; color: ${C.text}; -webkit-font-smoothing: antialiased; }
-        @keyframes toastIn { from { opacity:0; transform:translate(-50%,12px); } to { opacity:1; transform:translate(-50%,0); } }
-        @keyframes spin    { to { transform: rotate(360deg); } }
-        input:focus, textarea:focus { border-color: ${C.blue} !important; box-shadow: 0 0 0 3px ${C.blue}30 !important; }
-        button { font-family: ${FONT}; }
-        ::-webkit-scrollbar { width: 0; }
-      `}</style>
-
-      {/* Top Nav */}
-      <header style={{
-        background: C.white, borderBottom: `1px solid ${C.border}`,
-        padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center",
-        position: "sticky", top: 0, zIndex: 200, boxShadow: "0 2px 16px rgba(180,180,160,0.1)",
-      }}>
-        <div onClick={() => setPage("home")} style={{
-          fontFamily: FONT, fontSize: 18, fontWeight: 900, color: C.blue, cursor: "pointer", userSelect: "none",
-        }}>★ Wishlist</div>
-
-        {/* Locked identity pill — no switching in live app */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          background: C.blueLight, borderRadius: 50, padding: "7px 14px 7px 10px",
-          border: `2px solid ${C.blue}`,
-        }}>
-          <div style={{
-            width: 26, height: 26, borderRadius: "50%",
-            background: userId === "jamie" ? C.blue : C.pink,
-            color: userId === "jamie" ? C.white : C.pinkDark,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: 900, fontSize: 13,
-          }}>{currentUser.name[0]}</div>
-          <span style={{ fontFamily: FONT, fontWeight: 800, fontSize: 14, color: C.blueDark }}>
-            {currentUser.name}
-          </span>
-        </div>
-      </header>
-
-      {/* Content */}
-      <main style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px 100px" }}>
-        {loading ? <Spinner /> : (
-          <>
-            {page === "home"     && <HomePage      currentUser={currentUser} users={users} wishes={wishes} onNavigate={setPage} />}
-            {page === "add"      && <AddWishPage   onAdd={handleAddWish} onBack={() => setPage("home")} />}
-            {page === "mywishes" && <MyWishlistPage currentUser={currentUser} wishes={wishes} onBack={() => setPage("home")} onRequestAgain={handleRequestAgain} />}
-            {page === "evaluate" && <EvaluatePage  currentUser={currentUser} wishes={wishes} onBack={() => setPage("home")} onEvaluate={handleEvaluate} />}
-            {page === "redeem"   && <RedeemPage    currentUser={currentUser} wishes={wishes} onBack={() => setPage("home")} onRedeem={handleRedeem} />}
-            {page === "rewards"  && <RewardsPage   currentUser={currentUser} users={users} activities={activities} onBack={() => setPage("home")} onSendStar={handleSendStar} />}
-          </>
-        )}
-      </main>
-
-      <BottomNav page={page} onNavigate={setPage} />
-      {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
-    </>
-  );
-}
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding:
