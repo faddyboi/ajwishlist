@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { initializeApp } from "firebase/app";
 import {
-  getFirestore, collection, doc, onSnapshot,
-  addDoc, updateDoc, serverTimestamp, query, orderBy, setDoc, getDoc
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
+  collection,
+  getFirestore,
+  onSnapshot,
+  updateDoc,
+  addDoc,
+  doc,
+  serverTimestamp
+} from "firebase/firestore";
 // ─── Firebase Setup ───────────────────────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyDqCiKBERSp_ybqTPgHKGogW_uDywvwiDQ",
