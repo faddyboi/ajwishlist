@@ -701,6 +701,41 @@ const urlUser = (() => {
   const partner:     User = users.find(u => u.id !== userId) || { id: userId === "jamie" ? "andie" : "jamie", name: userId === "jamie" ? "Andie" : "Jamie", starBalance: 0 };
 
   const showToast = (msg: string) => setToast(msg);
+  // ── Dynamic manifest — locks start_url to this user so PWA launches correctly ──
+  useEffect(() => {
+    const manifest = {
+      name: "Jamie & Andie Wishlist",
+      short_name: "Wishlist ★",
+      description: "Our private wishlist and rewards app",
+      start_url: `/?user=${userId}`,
+      display: "standalone",
+      background_color: "#FAFAF8",
+      theme_color: "#B0C4DE",
+      orientation: "portrait",
+      icons: [
+        { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
+        { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+        { src: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+      ],
+    };
+
+    // Convert to a Blob URL and inject into <head>, replacing any static manifest
+    const blob    = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
+    const blobUrl = URL.createObjectURL(blob);
+
+    // Remove any existing <link rel="manifest"> first
+    const existing = document.querySelector("link[rel='manifest']");
+    if (existing) existing.remove();
+
+    // Inject the new dynamic one
+    const link = document.createElement("link");
+    link.rel   = "manifest";
+    link.href  = blobUrl;
+    document.head.appendChild(link);
+
+    // Clean up the Blob URL when the component unmounts
+    return () => URL.revokeObjectURL(blobUrl);
+  }, [userId]);
 
   // ── Seed user docs ──────────────────────────────────────────────────────────
   useEffect(() => {
