@@ -124,16 +124,16 @@ async function registerForPush(userId: string): Promise<void> {
   }
 }
 
-// Step 2: send a push to the partner's device via Firebase Cloud Messaging HTTP v1
-// For a private 2-person app we call the legacy FCM endpoint directly from the client.
-// This is intentionally simple — no Cloud Functions needed.
+// Step 2: send a push via our Firebase Cloud Function (the secure middleman)
+const CLOUD_FUNCTION_URL = "https://us-central1-jamie-andie-wishlist-claude.cloudfunctions.net/sendPushNotification";
+
 async function sendPush(toToken: string, title: string, body: string): Promise<void> {
   if (!toToken) return;
   try {
-    await fetch("https://fcm.googleapis.com/fcm/send", {
+    await fetch(CLOUD_FUNCTION_URL, {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ to: toToken, notification: { title, body } }),
+      body:    JSON.stringify({ token: toToken, title, body }),
     });
   } catch (err) {
     console.warn("Push send failed:", err);
