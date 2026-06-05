@@ -98,6 +98,19 @@ const fmt   = (ts: any): string => {
   return `${Math.floor(diff / 86400000)}d ago`;
 };
 
+// ─── Identity Resolution ──────────────────────────────────────────────────────
+// Priority: URL param (saves to localStorage) → localStorage → null (show welcome)
+const resolveUser = (): "jamie" | "andie" | null => {
+  const p = new URLSearchParams(window.location.search).get("user");
+  if (p === "jamie" || p === "andie") {
+    localStorage.setItem("wishlist_user", p);
+    return p;
+  }
+  const saved = localStorage.getItem("wishlist_user");
+  if (saved === "jamie" || saved === "andie") return saved;
+  return null;
+};
+
 // ─── Push Helpers ─────────────────────────────────────────────────────────────
 async function registerForPush(userId: string): Promise<void> {
   try {
@@ -125,6 +138,68 @@ async function sendPush(toToken: string, title: string, body: string): Promise<v
   } catch (err) {
     console.warn("Push send failed:", err);
   }
+}
+
+// ─── Welcome Screen ───────────────────────────────────────────────────────────
+function WelcomeScreen({ onSelect }: { onSelect: (user: "jamie" | "andie") => void }) {
+  return (
+    <div style={{
+      minHeight: "100dvh", background: C.bg,
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: "40px 28px", fontFamily: FONT,
+    }}>
+      <div style={{ fontSize: 56, marginBottom: 16 }}>⭐</div>
+      <h1 style={{ fontFamily: FONT, fontSize: 26, fontWeight: 900, color: C.text, textAlign: "center", marginBottom: 8 }}>
+        Welcome back!
+      </h1>
+      <p style={{ fontSize: 15, color: C.sub, fontWeight: 600, textAlign: "center", marginBottom: 48, lineHeight: 1.5 }}>
+        Who is using this device?
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", maxWidth: 320 }}>
+
+        {/* Jamie */}
+        <button onClick={() => onSelect("jamie")} style={{
+          background: `linear-gradient(135deg, ${C.blue} 0%, #C8D8F0 100%)`,
+          border: "none", borderRadius: 20, padding: "22px 24px",
+          display: "flex", alignItems: "center", gap: 18,
+          cursor: "pointer", boxShadow: `0 8px 24px ${C.blue}55`,
+        }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: "50%", background: C.white,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 24, fontWeight: 900, color: C.blue, flexShrink: 0,
+          }}>J</div>
+          <div style={{ textAlign: "left" }}>
+            <div style={{ fontFamily: FONT, fontWeight: 900, fontSize: 18, color: C.white }}>I am Jamie</div>
+            <div style={{ fontFamily: FONT, fontSize: 13, color: C.white, opacity: .85, marginTop: 2 }}>Tap to open your wishlist</div>
+          </div>
+        </button>
+
+        {/* Andie */}
+        <button onClick={() => onSelect("andie")} style={{
+          background: `linear-gradient(135deg, ${C.pinkDark} 0%, #FADADD 100%)`,
+          border: "none", borderRadius: 20, padding: "22px 24px",
+          display: "flex", alignItems: "center", gap: 18,
+          cursor: "pointer", boxShadow: `0 8px 24px ${C.pinkDark}55`,
+        }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: "50%", background: C.white,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 24, fontWeight: 900, color: C.pinkDark, flexShrink: 0,
+          }}>A</div>
+          <div style={{ textAlign: "left" }}>
+            <div style={{ fontFamily: FONT, fontWeight: 900, fontSize: 18, color: C.text }}>I am Andie</div>
+            <div style={{ fontFamily: FONT, fontSize: 13, color: C.sub, marginTop: 2 }}>Tap to open your wishlist</div>
+          </div>
+        </button>
+      </div>
+
+      <p style={{ fontSize: 12, color: C.muted, marginTop: 40, textAlign: "center", lineHeight: 1.6 }}>
+        Your choice will be remembered on this device.{"\n"}You won't be asked again.
+      </p>
+    </div>
+  );
 }
 
 // ─── Shared UI Atoms ──────────────────────────────────────────────────────────
@@ -279,68 +354,6 @@ function Spinner() {
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 20px", gap: 16 }}>
       <div style={{ width: 40, height: 40, borderRadius: "50%", border: `3px solid ${C.blueLight}`, borderTopColor: C.blue, animation: "spin .8s linear infinite" }} />
       <p style={{ color: C.sub, fontFamily: FONT, fontWeight: 600, fontSize: 14 }}>Connecting to database…</p>
-    </div>
-  );
-}
-
-// ─── Welcome Screen ───────────────────────────────────────────────────────────
-function WelcomeScreen({ onSelect }: { onSelect: (user: "jamie" | "andie") => void }) {
-  return (
-    <div style={{
-      minHeight: "100dvh", background: C.bg,
-      display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
-      padding: "40px 28px", fontFamily: FONT,
-    }}>
-      <div style={{ fontSize: 56, marginBottom: 16 }}>⭐</div>
-      <h1 style={{ fontFamily: FONT, fontSize: 26, fontWeight: 900, color: C.text, textAlign: "center", marginBottom: 8 }}>
-        Welcome back!
-      </h1>
-      <p style={{ fontSize: 15, color: C.sub, fontWeight: 600, textAlign: "center", marginBottom: 48, lineHeight: 1.5 }}>
-        Who is using this device?
-      </p>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", maxWidth: 320 }}>
-        {/* Jamie */}
-        <button onClick={() => onSelect("jamie")} style={{
-          background: `linear-gradient(135deg, ${C.blue} 0%, #C8D8F0 100%)`,
-          border: "none", borderRadius: 20, padding: "22px 24px",
-          display: "flex", alignItems: "center", gap: 18,
-          cursor: "pointer", boxShadow: `0 8px 24px ${C.blue}55`,
-        }}>
-          <div style={{
-            width: 52, height: 52, borderRadius: "50%", background: C.white,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 24, fontWeight: 900, color: C.blue, flexShrink: 0,
-          }}>J</div>
-          <div style={{ textAlign: "left" }}>
-            <div style={{ fontFamily: FONT, fontWeight: 900, fontSize: 18, color: C.white }}>I am Jamie</div>
-            <div style={{ fontFamily: FONT, fontSize: 13, color: C.white, opacity: .85, marginTop: 2 }}>Tap to open your wishlist</div>
-          </div>
-        </button>
-
-        {/* Andie */}
-        <button onClick={() => onSelect("andie")} style={{
-          background: `linear-gradient(135deg, ${C.pinkDark} 0%, #FADADD 100%)`,
-          border: "none", borderRadius: 20, padding: "22px 24px",
-          display: "flex", alignItems: "center", gap: 18,
-          cursor: "pointer", boxShadow: `0 8px 24px ${C.pinkDark}55`,
-        }}>
-          <div style={{
-            width: 52, height: 52, borderRadius: "50%", background: C.white,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 24, fontWeight: 900, color: C.pinkDark, flexShrink: 0,
-          }}>A</div>
-          <div style={{ textAlign: "left" }}>
-            <div style={{ fontFamily: FONT, fontWeight: 900, fontSize: 18, color: C.text }}>I am Andie</div>
-            <div style={{ fontFamily: FONT, fontSize: 13, color: C.sub, marginTop: 2 }}>Tap to open your wishlist</div>
-          </div>
-        </button>
-      </div>
-
-      <p style={{ fontSize: 12, color: C.muted, marginTop: 40, textAlign: "center", lineHeight: 1.6 }}>
-        Your choice will be remembered on this device.{"\n"}You won't be asked again.
-      </p>
     </div>
   );
 }
@@ -722,19 +735,9 @@ function BottomNav({ page, onNavigate }: { page: string; onNavigate: (page: stri
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
 
-  // ── Resolve identity: localStorage → URL param → null (show welcome screen) ─
-  const resolveUser = (): "jamie" | "andie" | null => {
-    const saved = localStorage.getItem("wishlist_user");
-    if (saved === "jamie" || saved === "andie") return saved;
-    const p = new URLSearchParams(window.location.search).get("user");
-    if (p === "jamie" || p === "andie") {
-      localStorage.setItem("wishlist_user", p);
-      return p;
-    }
-    return null;
-  };
+  // ── Resolve identity: URL param → localStorage → null (show welcome screen) ─
+  const [userId, setUserId] = useState<"jamie" | "andie" | null>(resolveUser);
 
-  const [userId,          setUserId]          = useState<"jamie" | "andie" | null>(resolveUser);
   const [users,           setUsers]           = useState<User[]>([]);
   const [wishes,          setWishes]          = useState<Wish[]>([]);
   const [activities,      setActivities]      = useState<Activity[]>([]);
@@ -744,7 +747,7 @@ export default function App() {
   const [showNotifBanner, setShowNotifBanner] = useState(false);
 
   const currentUser: User = users.find(u => u.id === userId) || { id: userId ?? "jamie", name: userId === "andie" ? "Andie" : "Jamie", starBalance: 0 };
-  const partner:     User = users.find(u => u.id !== userId) || { id: userId === "jamie" ? "andie" : "jamie", name: userId === "jamie" ? "Andie" : "Jamie", starBalance: 0 };
+  const partner:     User = users.find(u => u.id !== userId) || { id: userId === "andie" ? "jamie" : "andie", name: userId === "andie" ? "Jamie" : "Andie", starBalance: 0 };
 
   const showToast = (msg: string) => setToast(msg);
 
@@ -776,7 +779,7 @@ export default function App() {
     return () => { unsubUsers(); unsubWishes(); unsubActs(); };
   }, []);
 
-  // ── Show notification banner after 3 s if permission not yet decided ────────
+  // ── Show notification banner after 3 s (only once identity is known) ────────
   useEffect(() => {
     if (!userId) return;
     if (!("Notification" in window)) return;
@@ -803,7 +806,7 @@ export default function App() {
     await addDoc(collection(db, "activities"), { actorId, actionDescription: desc, timestamp: serverTimestamp() });
   }, []);
 
-  // ── Get partner's FCM token ─────────────────────────────────────────────────
+  // ── Get partner FCM token ───────────────────────────────────────────────────
   const getPartnerToken = async (): Promise<string | null> => {
     const snap = await getDoc(doc(db, "users", partner.id));
     return (snap.data()?.fcmToken as string) ?? null;
@@ -881,7 +884,7 @@ export default function App() {
     ::-webkit-scrollbar { width: 0; }
   `;
 
-  // ── Welcome screen (first launch — identity unknown) ────────────────────────
+  // ── Show Welcome Screen if identity still unknown ───────────────────────────
   if (!userId) {
     return (
       <>
@@ -894,7 +897,7 @@ export default function App() {
     );
   }
 
-  // ── Main app ────────────────────────────────────────────────────────────────
+  // ── Main App ────────────────────────────────────────────────────────────────
   return (
     <>
       <style>{globalStyles}</style>
