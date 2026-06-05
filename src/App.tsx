@@ -46,14 +46,13 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
 
-// Messaging is initialised lazily inside functions so it never crashes
-// on browsers that don't support it (e.g. Firefox private mode)
 const getMsg = () => {
   try { return getMessaging(app); }
   catch { return null; }
 };
 
 const VAPID_KEY = "BJPXl8fjnrp93YU6hZaTuyAy8egsSIjIIgpXnG5i0J24gy_6clmFGLhWVubai6prPS4znWEqTHqTbsxt4LDA9m8";
+const CLOUD_FUNCTION_URL = "https://us-central1-jamie-andie-wishlist-claude.cloudfunctions.net/sendPushNotification";
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -99,33 +98,21 @@ const fmt   = (ts: any): string => {
   return `${Math.floor(diff / 86400000)}d ago`;
 };
 
-// ─── Push Notification Helpers ────────────────────────────────────────────────
-
-// Step 1: ask permission + save this device's FCM token to Firestore
+// ─── Push Helpers ─────────────────────────────────────────────────────────────
 async function registerForPush(userId: string): Promise<void> {
   try {
     if (!("Notification" in window)) return;
     const permission = await Notification.requestPermission();
     if (permission !== "granted") return;
-
     const messaging = getMsg();
     if (!messaging) return;
-
-    // Make sure our service worker is registered first
     const swReg = await navigator.serviceWorker.getRegistration("/firebase-messaging-sw.js");
     const token  = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: swReg });
-
-    if (token) {
-      await updateDoc(doc(db, "users", userId), { fcmToken: token });
-    }
+    if (token) await updateDoc(doc(db, "users", userId), { fcmToken: token });
   } catch (err) {
-    // Notifications are a bonus — never crash the app over them
     console.warn("Push registration failed:", err);
   }
 }
-
-// Step 2: send a push via our Firebase Cloud Function (the secure middleman)
-const CLOUD_FUNCTION_URL = "https://us-central1-jamie-andie-wishlist-claude.cloudfunctions.net/sendPushNotification";
 
 async function sendPush(toToken: string, title: string, body: string): Promise<void> {
   if (!toToken) return;
@@ -154,7 +141,6 @@ function Toast({ msg, onDone }: { msg: string; onDone: () => void }) {
   );
 }
 
-// Friendly in-app banner asking permission (shown after 3 s if not yet granted)
 function NotifBanner({ onAllow, onDismiss }: { onAllow: () => void; onDismiss: () => void }) {
   return (
     <div style={{
@@ -297,6 +283,68 @@ function Spinner() {
   );
 }
 
+// ─── Welcome Screen ───────────────────────────────────────────────────────────
+function WelcomeScreen({ onSelect }: { onSelect: (user: "jamie" | "andie") => void }) {
+  return (
+    <div style={{
+      minHeight: "100dvh", background: C.bg,
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: "40px 28px", fontFamily: FONT,
+    }}>
+      <div style={{ fontSize: 56, marginBottom: 16 }}>⭐</div>
+      <h1 style={{ fontFamily: FONT, fontSize: 26, fontWeight: 900, color: C.text, textAlign: "center", marginBottom: 8 }}>
+        Welcome back!
+      </h1>
+      <p style={{ fontSize: 15, color: C.sub, fontWeight: 600, textAlign: "center", marginBottom: 48, lineHeight: 1.5 }}>
+        Who is using this device?
+      </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", maxWidth: 320 }}>
+        {/* Jamie */}
+        <button onClick={() => onSelect("jamie")} style={{
+          background: `linear-gradient(135deg, ${C.blue} 0%, #C8D8F0 100%)`,
+          border: "none", borderRadius: 20, padding: "22px 24px",
+          display: "flex", alignItems: "center", gap: 18,
+          cursor: "pointer", boxShadow: `0 8px 24px ${C.blue}55`,
+        }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: "50%", background: C.white,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 24, fontWeight: 900, color: C.blue, flexShrink: 0,
+          }}>J</div>
+          <div style={{ textAlign: "left" }}>
+            <div style={{ fontFamily: FONT, fontWeight: 900, fontSize: 18, color: C.white }}>I am Jamie</div>
+            <div style={{ fontFamily: FONT, fontSize: 13, color: C.white, opacity: .85, marginTop: 2 }}>Tap to open your wishlist</div>
+          </div>
+        </button>
+
+        {/* Andie */}
+        <button onClick={() => onSelect("andie")} style={{
+          background: `linear-gradient(135deg, ${C.pinkDark} 0%, #FADADD 100%)`,
+          border: "none", borderRadius: 20, padding: "22px 24px",
+          display: "flex", alignItems: "center", gap: 18,
+          cursor: "pointer", boxShadow: `0 8px 24px ${C.pinkDark}55`,
+        }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: "50%", background: C.white,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 24, fontWeight: 900, color: C.pinkDark, flexShrink: 0,
+          }}>A</div>
+          <div style={{ textAlign: "left" }}>
+            <div style={{ fontFamily: FONT, fontWeight: 900, fontSize: 18, color: C.text }}>I am Andie</div>
+            <div style={{ fontFamily: FONT, fontSize: 13, color: C.sub, marginTop: 2 }}>Tap to open your wishlist</div>
+          </div>
+        </button>
+      </div>
+
+      <p style={{ fontSize: 12, color: C.muted, marginTop: 40, textAlign: "center", lineHeight: 1.6 }}>
+        Your choice will be remembered on this device.{"\n"}You won't be asked again.
+      </p>
+    </div>
+  );
+}
+
 // ─── PAGE: Home ───────────────────────────────────────────────────────────────
 function HomePage({ currentUser, users, wishes, onNavigate }: { currentUser: User; users: User[]; wishes: Wish[]; onNavigate: (page: string) => void }) {
   const partner       = users.find(u => u.id !== currentUser.id);
@@ -377,7 +425,7 @@ function HomePage({ currentUser, users, wishes, onNavigate }: { currentUser: Use
 
 // ─── PAGE: Add Wish ───────────────────────────────────────────────────────────
 function AddWishPage({ onAdd, onBack }: { onAdd: (wish: Partial<Wish>) => Promise<void>; onBack: () => void }) {
-  const [f, setF]       = useState({ itemName: "", price: "", desireLevel: 3, url: "", persuasionText: "" });
+  const [f, setF]           = useState({ itemName: "", price: "", desireLevel: 3, url: "", persuasionText: "" });
   const [saving, setSaving] = useState(false);
   const set = (k: string, v: any) => setF(p => ({ ...p, [k]: v }));
 
@@ -673,69 +721,32 @@ function BottomNav({ page, onNavigate }: { page: string; onNavigate: (page: stri
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
-const urlUser = (() => {
-    // 1. Check the URL parameter first
+
+  // ── Resolve identity: localStorage → URL param → null (show welcome screen) ─
+  const resolveUser = (): "jamie" | "andie" | null => {
+    const saved = localStorage.getItem("wishlist_user");
+    if (saved === "jamie" || saved === "andie") return saved;
     const p = new URLSearchParams(window.location.search).get("user");
     if (p === "jamie" || p === "andie") {
-      // 2. If found, save it to localStorage for future PWA launches
       localStorage.setItem("wishlist_user", p);
       return p;
     }
-    // 3. No URL param (e.g. opened from home screen) — check localStorage
-    const saved = localStorage.getItem("wishlist_user");
-    if (saved === "jamie" || saved === "andie") return saved;
-    // 4. Absolute fallback
-    return "jamie";
-  })();
+    return null;
+  };
 
+  const [userId,          setUserId]          = useState<"jamie" | "andie" | null>(resolveUser);
   const [users,           setUsers]           = useState<User[]>([]);
   const [wishes,          setWishes]          = useState<Wish[]>([]);
   const [activities,      setActivities]      = useState<Activity[]>([]);
-  const [userId]                              = useState<string>(urlUser);
   const [page,            setPage]            = useState("home");
   const [toast,           setToast]           = useState<string | null>(null);
   const [loading,         setLoading]         = useState(true);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
 
-  const currentUser: User = users.find(u => u.id === userId) || { id: userId, name: userId === "jamie" ? "Jamie" : "Andie", starBalance: 0 };
+  const currentUser: User = users.find(u => u.id === userId) || { id: userId ?? "jamie", name: userId === "andie" ? "Andie" : "Jamie", starBalance: 0 };
   const partner:     User = users.find(u => u.id !== userId) || { id: userId === "jamie" ? "andie" : "jamie", name: userId === "jamie" ? "Andie" : "Jamie", starBalance: 0 };
 
   const showToast = (msg: string) => setToast(msg);
-  // ── Dynamic manifest — locks start_url to this user so PWA launches correctly ──
-  useEffect(() => {
-    const manifest = {
-      name: "Jamie & Andie Wishlist",
-      short_name: "Wishlist ★",
-      description: "Our private wishlist and rewards app",
-      start_url: `/?user=${userId}`,
-      display: "standalone",
-      background_color: "#FAFAF8",
-      theme_color: "#B0C4DE",
-      orientation: "portrait",
-      icons: [
-        { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
-        { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
-        { src: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
-      ],
-    };
-
-    // Convert to a Blob URL and inject into <head>, replacing any static manifest
-    const blob    = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
-    const blobUrl = URL.createObjectURL(blob);
-
-    // Remove any existing <link rel="manifest"> first
-    const existing = document.querySelector("link[rel='manifest']");
-    if (existing) existing.remove();
-
-    // Inject the new dynamic one
-    const link = document.createElement("link");
-    link.rel   = "manifest";
-    link.href  = blobUrl;
-    document.head.appendChild(link);
-
-    // Clean up the Blob URL when the component unmounts
-    return () => URL.revokeObjectURL(blobUrl);
-  }, [userId]);
 
   // ── Seed user docs ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -749,7 +760,7 @@ const urlUser = (() => {
     seed();
   }, []);
 
-  // ── Real-time listeners ─────────────────────────────────────────────────────
+  // ── Real-time Firestore listeners ───────────────────────────────────────────
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, "users"), snap => {
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
@@ -767,12 +778,13 @@ const urlUser = (() => {
 
   // ── Show notification banner after 3 s if permission not yet decided ────────
   useEffect(() => {
+    if (!userId) return;
     if (!("Notification" in window)) return;
     if (Notification.permission === "default") {
       const t = setTimeout(() => setShowNotifBanner(true), 3000);
       return () => clearTimeout(t);
     }
-  }, []);
+  }, [userId]);
 
   // ── Handle foreground push messages (app is open) ───────────────────────────
   useEffect(() => {
@@ -791,7 +803,7 @@ const urlUser = (() => {
     await addDoc(collection(db, "activities"), { actorId, actionDescription: desc, timestamp: serverTimestamp() });
   }, []);
 
-  // ── Get partner's FCM token from Firestore ──────────────────────────────────
+  // ── Get partner's FCM token ─────────────────────────────────────────────────
   const getPartnerToken = async (): Promise<string | null> => {
     const snap = await getDoc(doc(db, "users", partner.id));
     return (snap.data()?.fcmToken as string) ?? null;
@@ -799,6 +811,7 @@ const urlUser = (() => {
 
   // ── App actions ─────────────────────────────────────────────────────────────
   const handleAddWish = async ({ itemName, price, desireLevel, url, persuasionText }: Partial<Wish>) => {
+    if (!userId) return;
     await addDoc(collection(db, "wishes"), {
       ownerId: userId, itemName, price, desireLevel, url, persuasionText,
       status: "Pending", starCost: 0, requestCount: 1,
@@ -812,6 +825,7 @@ const urlUser = (() => {
   };
 
   const handleRequestAgain = async (wishId: string) => {
+    if (!userId) return;
     const w = wishes.find(x => x.id === wishId);
     await updateDoc(doc(db, "wishes", wishId), { requestCount: (w?.requestCount || 1) + 1, lastRequestedAt: serverTimestamp() });
     await logActivity(userId, `${w?.itemName} was requested again!`);
@@ -821,6 +835,7 @@ const urlUser = (() => {
   };
 
   const handleEvaluate = async (wishId: string, status: string, starCost: number) => {
+    if (!userId) return;
     const w = wishes.find(x => x.id === wishId);
     await updateDoc(doc(db, "wishes", wishId), { status, starCost });
     await logActivity(userId, `${status === "Approved" ? "Approved" : "Considering"}: ${w?.itemName}`);
@@ -832,6 +847,7 @@ const urlUser = (() => {
   };
 
   const handleRedeem = async (wishId: string) => {
+    if (!userId) return;
     const w = wishes.find(x => x.id === wishId);
     if (!w) return;
     if ((currentUser.starBalance ?? 0) < w.starCost) {
@@ -845,6 +861,7 @@ const urlUser = (() => {
   };
 
   const handleSendStar = async () => {
+    if (!userId) return;
     await updateDoc(doc(db, "users", partner.id), { starBalance: (partner.starBalance ?? 0) + 1 });
     await logActivity(userId, `Sent ${partner.name} a ⭐ Star!`);
     const token = await getPartnerToken();
@@ -852,18 +869,35 @@ const urlUser = (() => {
     showToast("Star has been sent! ⭐");
   };
 
+  // ── Global styles ───────────────────────────────────────────────────────────
+  const globalStyles = `
+    @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: ${C.bg}; font-family: ${FONT}; color: ${C.text}; -webkit-font-smoothing: antialiased; }
+    @keyframes toastIn { from { opacity:0; transform:translate(-50%,12px); } to { opacity:1; transform:translate(-50%,0); } }
+    @keyframes spin    { to { transform: rotate(360deg); } }
+    input:focus, textarea:focus { border-color: ${C.blue} !important; box-shadow: 0 0 0 3px ${C.blue}30 !important; }
+    button { font-family: ${FONT}; }
+    ::-webkit-scrollbar { width: 0; }
+  `;
+
+  // ── Welcome screen (first launch — identity unknown) ────────────────────────
+  if (!userId) {
+    return (
+      <>
+        <style>{globalStyles}</style>
+        <WelcomeScreen onSelect={(user) => {
+          localStorage.setItem("wishlist_user", user);
+          setUserId(user);
+        }} />
+      </>
+    );
+  }
+
+  // ── Main app ────────────────────────────────────────────────────────────────
   return (
     <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { background: ${C.bg}; font-family: ${FONT}; color: ${C.text}; -webkit-font-smoothing: antialiased; }
-        @keyframes toastIn { from { opacity:0; transform:translate(-50%,12px); } to { opacity:1; transform:translate(-50%,0); } }
-        @keyframes spin    { to { transform: rotate(360deg); } }
-        input:focus, textarea:focus { border-color: ${C.blue} !important; box-shadow: 0 0 0 3px ${C.blue}30 !important; }
-        button { font-family: ${FONT}; }
-        ::-webkit-scrollbar { width: 0; }
-      `}</style>
+      <style>{globalStyles}</style>
 
       {/* Top Nav */}
       <header style={{
