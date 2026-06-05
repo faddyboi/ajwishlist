@@ -673,9 +673,19 @@ function BottomNav({ page, onNavigate }: { page: string; onNavigate: (page: stri
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const urlUser = (() => {
+const urlUser = (() => {
+    // 1. Check the URL parameter first
     const p = new URLSearchParams(window.location.search).get("user");
-    return p === "andie" ? "andie" : "jamie";
+    if (p === "jamie" || p === "andie") {
+      // 2. If found, save it to localStorage for future PWA launches
+      localStorage.setItem("wishlist_user", p);
+      return p;
+    }
+    // 3. No URL param (e.g. opened from home screen) — check localStorage
+    const saved = localStorage.getItem("wishlist_user");
+    if (saved === "jamie" || saved === "andie") return saved;
+    // 4. Absolute fallback
+    return "jamie";
   })();
 
   const [users,           setUsers]           = useState<User[]>([]);
